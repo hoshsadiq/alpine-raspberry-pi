@@ -1,0 +1,23 @@
+#!/bin/sh
+
+set -eux
+
+
+pi_init=false
+for opt in $(cat /proc/cmdline 2>/dev/null); do
+    case "$opt" in
+        pi_init=true|pi_init=1) pi_init=true ;;
+    esac
+done
+
+if [ $pi_init != "true" ]; then
+    exit 0
+fi
+
+if [ -f /boot/pi-init ]; then
+    sh -x /boot/pi-init >/var/log/pi-init.log 2>&1
+fi
+
+
+rc-update del pi-init
+rm /etc/init.d/pi-init /usr/bin/pi-init

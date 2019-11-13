@@ -1,0 +1,14 @@
+#!/bin/sh
+
+set -eux
+
+parted --script /dev/mmcblk0 resizepart 2 yes 100%
+partprobe
+resize2fs /dev/mmcblk0p2
+
+apk del resizepart e2fsprogs-extra parted
+
+rc-update del first-boot
+rm /etc/init.d/first-boot /usr/bin/first-boot
+
+reboot

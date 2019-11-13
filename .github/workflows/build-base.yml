@@ -1,0 +1,55 @@
+name: build rpi-alpine-base.img
+
+on:
+  pull_request: ~
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+
+env:
+  ALPINE_VERSION: 3.10.2
+  ALPINE_ARCH: aarch64
+  ALPINE_CHROOT_INSTALL_CHECKSUM: df472cbd2dc93eb0b3126d06209363c4fc328ea3
+  ALPINE_CHROOT_INSTALL: https://raw.githubusercontent.com/alpinelinux/alpine-chroot-install/v0.11.0/alpine-chroot-install
+
+jobs:
+  build_base:
+    name: build alpine-rpi-base
+    runs-on: [ubuntu-18.04]
+    steps:
+      - uses: actions/checkout@v1
+      - run: curl -fsSL "$ALPINE_CHROOT_INSTALL" -o alpine-chroot-install
+      - run: echo "$ALPINE_CHROOT_INSTALL_CHECKSUM alpine-chroot-install" | sha1sum -c
+      - run: chmod +x alpine-chroot-install
+      - run: sudo chown root:root alpine-chroot-install
+      - name: Run a one-line script
+        run: sudo ./make-image $ALPINE_VERSION $ALPINE_ARCH
+      - name: Upload alpine-chroot-install
+        uses: actions/upload-artifact@v1
+        with:
+          name: alpine-base
+          path: alpine-rpi-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz # todo this should be alpine-rpi-base
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          #tag_name: ${{ github.ref }}
+          tag_name: v1
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1.0.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
+          asset_path: ./alpine-rpi-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz # todo this should be alpine-rpi-base
+          asset_name: alpine-rpi-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz
+          asset_content_type: application/gzip

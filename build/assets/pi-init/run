@@ -1,0 +1,8 @@
+#!/sbin/openrc-run
+
+command="/usr/bin/pi-init"
+command_background=false
+depend() {
+  after modules
+  need localmount
+}
