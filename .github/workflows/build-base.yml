@@ -26,30 +26,90 @@ jobs:
       - run: sudo chown root:root alpine-chroot-install
       - name: Run a one-line script
         run: sudo ./make-image $ALPINE_VERSION $ALPINE_ARCH
-      - name: Upload alpine-chroot-install
+
+      - run: mkdir images
+      - run: mv alpine-rpi-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz images/alpine-rpi-base-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz
+      - run: |
+          cd output
+          sha256sum alpine-rpi-base-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz >> images/sha256sums.txt
+      - name: Upload release
         uses: actions/upload-artifact@v1
         with:
-          name: alpine-base
-          path: alpine-rpi-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz # todo this should be alpine-rpi-base
+          name: images
+          path: images/
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#      - name: Create Release
+#        id: create_release
+#        uses: actions/create-release@v1.0.0
+#        env:
+#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#        with:
+#          #tag_name: ${{ github.ref }} # todo need to update the repository dispatch below too
+#          tag_name: v1
+#          release_name: Release ${{ github.ref }}
+#          draft: false
+#          prerelease: false
+#      - name: Upload Release Asset
+#        id: upload_base_image
+#        uses: actions/upload-release-asset@v1.0.1
+#        env:
+#          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#        with:
+#          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
+#          asset_path: ./alpine-rpi-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz # todo this should be alpine-rpi-base
+#          asset_name: alpine-rpi-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz
+#          asset_content_type: application/gzip
+#      - name: Repository Dispatch
+#        uses: peter-evans/repository-dispatch@v1
+#        with:
+#          token: ${{ secrets.REPO_ACCESS_TOKEN }}
+#          repository: username/my-repo
+#          event-type: my-event
+#          client-payload: |
+#            {
+#              "sha": "${{ github.sha }}",
+#              "upload_url": "${{ steps.create_release.outputs.upload_url }}",
+#              "alpine": {
+#                "version": "${{ env.ALPINE_VERSION }}",
+#                "arch": "${{ env.ALPINE_ARCH }}",
+#                "base_img_url": "${{ steps.upload_base_image.outputs.browser_download_url }}"
+#              }
+#            }
+
+
+  build_packer:
+    needs: build_base
+    name: build alpine-rpi-images
+    runs-on: [ubuntu-18.04]
+    strategy:
+      matrix:
+        packer:
+          - containerd
+
+    steps:
+      - uses: actions/checkout@v1
+      - name: Download images
+        uses: actions/download-artifact@v1
         with:
-          #tag_name: ${{ github.ref }}
-          tag_name: v1
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
+          name: images
+      - run: |
+          packer build \
+            -var 'iso_url=images/alpine-rpi-base-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz' \
+            -var "iso_checksum=$(awk '/ alpine-rpi-base-/{print $1}' images/sha256sums.txt)" \
+            packer/${{ matrix.packer }}.json
+      - run: |
+          output="output-arm-image/image"
+          sum="$(sha256sum image | awk '{print $1}')"
+          mv output-arm-image/image build/alpine-rpi-${{ matrix.packer }}-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img
+
+
       - name: Upload Release Asset
         id: upload-release-asset
         uses: actions/upload-release-asset@v1.0.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
-          asset_path: ./alpine-rpi-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz # todo this should be alpine-rpi-base
-          asset_name: alpine-rpi-${{ env.ALPINE_VERSION }}-${{ env.ALPINE_ARCH }}.img.gz
+          upload_url: ${{ github.event.client_payload.upload_url }}
+          asset_path: ./alpine-rpi-containerd-${{ github.event.client_payload.alpine.version }}-${{ github.event.client_payload.alpine.arch }}.img.gz
+          asset_name: alpine-rpi-${{ github.event.client_payload.alpine.version }}-${{ github.event.client_payload.alpine.arch }}.img.gz
           asset_content_type: application/gzip
