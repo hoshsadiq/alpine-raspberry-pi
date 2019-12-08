@@ -24,7 +24,9 @@
     {
       "type": "checksum",
       "output": "manifest.json",
-      "strip_path": true
+      "checksum_types": [
+        "sha256"
+      ]
     }
   ]
 }

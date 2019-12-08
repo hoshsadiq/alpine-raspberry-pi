@@ -1,8 +1,0 @@
-name: build rpi-alpine-containerd.img
-
-on:
-  repository_dispatch:
-    types:
-      - build-non-base
-
-jobs:
