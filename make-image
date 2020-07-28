@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
 
 # these scripts are based on https://github.com/knoopx/alpine-raspberry-pi.
+# todo https://raw.githubusercontent.com/Drewsif/PiShrink/master/pishrink.sh
 
 set -eux
 
-script_dir=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+enter_chroot=false
+if [[ "${1:-}" == "shell" ]]; then
+  shift
+  enter_chroot=true
+fi
 
-ALPINE_VERSION="$1"
-ALPINE_ARCH="$2"
+ALPINE_VERSION="${1:-3.12}"
+ALPINE_ARCH="${2:-aarch64}"
 
 if [[ "$ALPINE_ARCH" == "" ]] || [[ "$ALPINE_VERSION" == "" ]]; then
-    echo "Error: must specify arguments alpine arch and version"
-    echo "Usage:"
-    echo "  $0 <version> <arch>"
-    echo ""
-    echo "Example:"
-    echo "  $0 v3.10.2 aarch64"
+  echo "Error: must specify arguments alpine arch and version"
+  echo "Usage:"
+  echo "  $0 <version> <arch>"
+  echo ""
+  echo "Example:"
+  echo "  $0 v3.10.2 aarch64"
 fi
 
 alpine_branch="$(echo "$ALPINE_VERSION" | awk -F. '{gsub("^v", "", $1); print "v"$1"."$2}')"
@@ -28,30 +34,30 @@ boot_dir="$rootfs/boot"
 build_dir="$rootfs/build"
 
 clean_up() {
-	[[ -x "$rootfs/destroy" ]] && "$rootfs/destroy" -y || true
-	findmnt -M "$rootfs" && umount "$rootfs"
-	[[ -n "$tmpdir" ]] && rm -rf "$tmpdir"
-	losetup --detach-all # todo this should be only the current loop
+  [[ -x "$rootfs/destroy" ]] && "$rootfs/destroy" -y || true
+  findmnt -M "$rootfs" && umount "$rootfs"
+  [[ -n "$tmpdir" ]] && rm -rf "$tmpdir"
+  losetup --detach-all # todo this should be only the current loop
 }
 trap clean_up SIGTERM SIGINT SIGQUIT
 
 truncate -s 2G "$artifact_file"
 
 {
-    echo "o"
-    echo "n"
-    echo "p"
-    echo "1"
-    echo ""
-    echo "+128MB"
-    echo "t"
-    echo "c"
-    echo "n"
-    echo "p"
-    echo "2"
-    echo ""
-    echo ""
-    echo "w"
+  echo "o"
+  echo "n"
+  echo "p"
+  echo "1"
+  echo ""
+  echo "+128MB"
+  echo "t"
+  echo "c"
+  echo "n"
+  echo "p"
+  echo "2"
+  echo ""
+  echo ""
+  echo "w"
 } | fdisk -H 255 -S 63 "$artifact_file"
 
 LOOP_DEV=$(losetup --partscan --show --find "$artifact_file")
@@ -60,7 +66,7 @@ ROOT_DEV="$LOOP_DEV"p2
 
 # format partitions
 mkfs.fat -F32 -n ALPINE "$BOOT_DEV"
-mkfs.ext4 "$ROOT_DEV"
+mkfs.ext4 -O '^has_journal' "$ROOT_DEV"
 mkdir -p "$rootfs"
 mount --make-private "$ROOT_DEV" "$rootfs"
 mkdir -p "$boot_dir"
@@ -69,29 +75,34 @@ mkdir -p "$build_dir"
 mount --bind "$script_dir/build" "$build_dir"
 
 sudo ./alpine-chroot-install \
-    -a "$ALPINE_ARCH" \
-    -b "$alpine_branch" \
-    -d "$rootfs" \
-    -k "ARCH CI QEMU_EMULATOR RPI_CI_.* TRAVIS_.*" \
-    -p "ca-certificates ssl_client"
+  -a "$ALPINE_ARCH" \
+  -b "$alpine_branch" \
+  -d "$rootfs" \
+  -k "ARCH CI QEMU_EMULATOR RPI_CI_.* TRAVIS_.*" \
+  -p "ca-certificates ssl_client"
 
-"$rootfs/enter-chroot" /build/run.sh
+"${script_dir}/build/run.sh" "$rootfs"
 
-umount -lf "$rootfs"
+if [[ "$enter_chroot" == "true" ]]; then
+  "$rootfs/enter-chroot"
+fi
 
-file_dirs=( \
-    var/cache/apk \
-    root \
-    enter-chroot \
-    destroy \
-    etc/resolv.conf \
-    env.sh \
+file_dirs=(
+  var/cache/apk
+  root
+  enter-chroot
+  destroy
+  etc/resolv.conf
+  env.sh
 )
 for file_dir in "${file_dirs[@]}"; do
-    file_dir="$rootfs/$file_dir"
-    [[ -d "$file_dir" ]] && find "$file_dir" -mindepth 1 -delete
-    [[ -f "$file_dir" ]] && rm "$file_dir"
+  file_dir="$rootfs/$file_dir"
+  ls -la "$file_dir"
+  [[ -d "$file_dir" ]] && find "$file_dir" -mindepth 1 -delete
+  [[ -f "$file_dir" ]] && rm "$file_dir"
 done
+
+umount -lf "$rootfs"
 
 # shrink image
 ROOT_PART_START=$(parted -ms "$artifact_file" unit B print | awk -F: 'END{gsub("B$", "", $2); print $2}')
@@ -103,7 +114,7 @@ e2fsck -f -p "$ROOT_DEV"
 resize2fs -p "$ROOT_DEV" "$ROOT_MIN_SIZE"
 
 # shrink partition
-PART_END=$(($ROOT_PART_START + ($ROOT_MIN_SIZE * $ROOT_BLOCK_SIZE)))
+PART_END=$((ROOT_PART_START + (ROOT_MIN_SIZE * ROOT_BLOCK_SIZE)))
 parted ---pretend-input-tty "$artifact_file" unit B resizepart 2 "$PART_END" yes
 
 losetup -d "$LOOP_DEV"
@@ -112,6 +123,6 @@ losetup -d "$LOOP_DEV"
 FREE_START=$(parted -ms "$artifact_file" unit B print free | awk -F: 'END{gsub("B$", "", $2); print $2}')
 truncate -s "$FREE_START" "$artifact_file"
 
-gzip -f "$artifact_file"
+#gzip -f "$artifact_file"
 
 echo "DONE."

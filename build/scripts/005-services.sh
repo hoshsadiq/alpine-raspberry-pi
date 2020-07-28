@@ -15,6 +15,6 @@ for service in dbus local networking avahi-daemon; do
 	rc-update add $service default
 done
 
-for service in mount-ro killprocs savecache; do
+for service in killprocs savecache; do
 	rc-update add $service shutdown
 done
